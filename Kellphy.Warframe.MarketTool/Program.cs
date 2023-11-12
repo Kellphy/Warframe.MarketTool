@@ -45,13 +45,11 @@ namespace Kellphy.Warframe.MarketTool
 
 		public async Task Invoke()
 		{
-			{
-				await Logic();
+			await Logic();
 
-				Console.WriteLine("--- Completed! Press any key to reset.");
-				Console.ReadKey();
-				Console.WriteLine();
-			}
+			Console.WriteLine("--- Completed! Press any key to reset.");
+			Console.ReadKey();
+			Console.WriteLine();
 		}
 
 		static async Task Logic()
@@ -73,11 +71,12 @@ namespace Kellphy.Warframe.MarketTool
 
 				var modList = await GetModList();
 
-				Console.WriteLine("[1] New Loka > Perrin Seq");
-				Console.WriteLine("[2] Perrin Seq > New Loka");
-				Console.WriteLine("[3] New Loka");
-				Console.WriteLine("[4] Perrin Seq");
-				Console.WriteLine("[.] Clear");
+				Console.WriteLine(
+					"[1] New Loka > Perrin Seq" +
+					"\n[2] Perrin Seq > New Loka" +
+					"\n[3] New Loka" +
+					"\n[4] Perrin Seq" +
+					"\n[.] Clear");
 				var choice = Console.ReadKey();
 				Console.WriteLine();
 

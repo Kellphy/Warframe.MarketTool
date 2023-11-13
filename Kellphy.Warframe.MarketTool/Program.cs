@@ -86,10 +86,10 @@ namespace Kellphy.Warframe.MarketTool
 			var modList = await GetModList();
 
 			Console.WriteLine(
-				"[1] New Loka > Perrin Seq" +
-				"\n[2] Perrin Seq > New Loka" +
-				"\n[3] New Loka" +
-				"\n[4] Perrin Seq" +
+				$"[1] {_syndicates[Syndicate.NewLoka]} > {_syndicates[Syndicate.PerrinSequence]}" +
+				$"\n[2] {_syndicates[Syndicate.PerrinSequence]} > {_syndicates[Syndicate.NewLoka]}" +
+				$"\n[3] {_syndicates[Syndicate.NewLoka]}" +
+				$"\n[4] {_syndicates[Syndicate.PerrinSequence]}" +
 				"\n[.] Clear");
 			var choice = Console.ReadKey();
 			Console.WriteLine();

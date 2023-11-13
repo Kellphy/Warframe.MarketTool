@@ -1,7 +1,6 @@
 ﻿namespace Kellphy.Warframe.MarketTool
 {
-
-	class ItemList
+	public class ItemList
 	{
 		public class Item
 		{
@@ -21,7 +20,8 @@
 			public Payload? payload { get; set; }
 		}
 	}
-	class Request
+
+	internal class Request
 	{
 		public class OrderMod
 		{
@@ -41,7 +41,8 @@
 			public string? device_id { get; set; }
 		}
 	}
-	class WFMOrder
+
+	internal class WFMOrder
 	{
 		public class Item
 		{
@@ -80,7 +81,8 @@
 			public Payload? payload { get; set; }
 		}
 	}
-	class WFMods
+
+	internal class WFMods
 	{
 		public class Drop
 		{

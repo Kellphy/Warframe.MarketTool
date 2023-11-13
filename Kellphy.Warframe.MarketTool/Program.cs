@@ -10,34 +10,43 @@ namespace Kellphy.Warframe.MarketTool
 	{
 
 #pragma warning disable CS8618 // Added in custom constructor
-		static HttpClient client;
-		static string JWT; // JWT is the security key, store this as email+pw combo
-		static string email;
-		static string password;
+		private static HttpClient _client;
+		private static string _jwt; // JWT is the security key, store this as email+pw combo
+		private static string _email;
+		private static string _password;
 #pragma warning restore CS8618
 
-		const string newLoka = "New Loka";
-		const string perrinSequence = "Perrin Sequence";
-		static int platinum = 25;
+		private enum Syndicate
+		{
+			NewLoka,
+			PerrinSequence
+		};
 
-		Program()
+		private static Dictionary<Syndicate, string> _syndicates = new()
+		{
+			{ Syndicate.NewLoka, "New Loka" },
+			{ Syndicate.PerrinSequence, "Perrin Sequence" }
+		};
+		private static int _platinum = 25;
+
+		private Program()
 		{
 			HttpClientHandler handler = new HttpClientHandler()
 			{
 				UseCookies = false
 			};
-			client = new HttpClient(handler);
-			JWT = string.Empty;
+			_client = new HttpClient(handler);
+			_jwt = string.Empty;
 
 			var configuration = new ConfigurationBuilder()
 				.AddUserSecrets<Program>()
 				.Build();
 
-			email = configuration["email"];
-			password = configuration["password"];
+			_email = configuration["email"];
+			_password = configuration["password"];
 		}
 
-		static async Task Main(string[] args)
+		private static async Task Main(string[] args)
 		{
 			var program = new Program();
 			await program.Invoke();
@@ -45,82 +54,87 @@ namespace Kellphy.Warframe.MarketTool
 
 		public async Task Invoke()
 		{
-			await Logic();
+			while (true)
+			{
+				await Logic();
 
-			Console.WriteLine("--- Completed! Press any key to reset.");
-			Console.ReadKey();
-			Console.WriteLine();
+				Console.WriteLine("--- Completed! Press any key to reset.");
+				Console.ReadKey();
+				Console.Clear();
+			}
 		}
 
-		static async Task Logic()
+		private static async Task Logic()
 		{
 			if (!File.Exists("orders.txt"))
 			{
 				File.Create("orders.txt");
 			}
 
-			var response = await client.GetAsync("https://api.warframe.market/v1/items");
+			var response = await _client.GetAsync("https://api.warframe.market/v1/items");
 			var responseContent = await response.Content.ReadAsStringAsync();
 			var responseJson = JsonConvert.DeserializeObject<ItemList.Root>(responseContent);
 
-			if (responseJson != null)
+			if (responseJson is null)
 			{
-				await Login(email, password);
-
-				var orderIds = new List<string>();
-
-				var modList = await GetModList();
-
-				Console.WriteLine(
-					"[1] New Loka > Perrin Seq" +
-					"\n[2] Perrin Seq > New Loka" +
-					"\n[3] New Loka" +
-					"\n[4] Perrin Seq" +
-					"\n[.] Clear");
-				var choice = Console.ReadKey();
-				Console.WriteLine();
-
-				await DeleteOrders();
-
-				switch (choice.Key)
-				{
-					case ConsoleKey.D1:
-					case ConsoleKey.D2:
-					case ConsoleKey.D3:
-					case ConsoleKey.D4:
-						Console.Write("Platinum for mods: ");
-						if (int.TryParse(Console.ReadLine(), out int newPlatinum))
-						{
-							platinum = newPlatinum;
-						}
-						Console.WriteLine("--- Using price: " + platinum);
-						break;
-				}
-
-				switch (choice.Key)
-				{
-					case ConsoleKey.D1:
-						orderIds.AddRange(await AddItems(responseJson, modList[newLoka]));
-						orderIds.AddRange(await AddItems(responseJson, modList[perrinSequence]));
-						break;
-					case ConsoleKey.D2:
-						orderIds.AddRange(await AddItems(responseJson, modList[perrinSequence]));
-						orderIds.AddRange(await AddItems(responseJson, modList[newLoka]));
-						break;
-					case ConsoleKey.D3:
-						orderIds.AddRange(await AddItems(responseJson, modList[newLoka]));
-						break;
-					case ConsoleKey.D4:
-						orderIds.AddRange(await AddItems(responseJson, modList[perrinSequence]));
-						break;
-				}
-
-				File.WriteAllText("orders.txt", JsonConvert.SerializeObject(orderIds));
-				Console.WriteLine("Added Orders: " + orderIds.Count);
+				"Null Response".WriteErrorMessage();
+				return;
 			}
+
+			await Login(_email, _password);
+
+			var modList = await GetModList();
+
+			Console.WriteLine(
+				"[1] New Loka > Perrin Seq" +
+				"\n[2] Perrin Seq > New Loka" +
+				"\n[3] New Loka" +
+				"\n[4] Perrin Seq" +
+				"\n[.] Clear");
+			var choice = Console.ReadKey();
+			Console.WriteLine();
+
+			await DeleteOrders();
+
+			switch (choice.Key)
+			{
+				case ConsoleKey.D1:
+				case ConsoleKey.D2:
+				case ConsoleKey.D3:
+				case ConsoleKey.D4:
+					Console.Write("Platinum for mods: ");
+					if (int.TryParse(Console.ReadLine(), out int newPlatinum))
+					{
+						_platinum = newPlatinum;
+					}
+					Console.WriteLine("--- Using price: " + _platinum);
+					break;
+			}
+
+			var orderIds = new List<string>();
+			switch (choice.Key)
+			{
+				case ConsoleKey.D1:
+					orderIds.AddRange(await AddItems(responseJson, modList[_syndicates[Syndicate.NewLoka]]));
+					orderIds.AddRange(await AddItems(responseJson, modList[_syndicates[Syndicate.PerrinSequence]]));
+					break;
+				case ConsoleKey.D2:
+					orderIds.AddRange(await AddItems(responseJson, modList[_syndicates[Syndicate.PerrinSequence]]));
+					orderIds.AddRange(await AddItems(responseJson, modList[_syndicates[Syndicate.NewLoka]]));
+					break;
+				case ConsoleKey.D3:
+					orderIds.AddRange(await AddItems(responseJson, modList[_syndicates[Syndicate.NewLoka]]));
+					break;
+				case ConsoleKey.D4:
+					orderIds.AddRange(await AddItems(responseJson, modList[_syndicates[Syndicate.PerrinSequence]]));
+					break;
+			}
+
+			File.WriteAllText("orders.txt", JsonConvert.SerializeObject(orderIds));
+			$"Added Orders: {orderIds.Count}".WriteGoodMessage();
 		}
 
-		static async Task<Dictionary<string, string[]>> GetModList()
+		private static async Task<Dictionary<string, string[]>> GetModList()
 		{
 			Dictionary<string, string[]> syndicates = new();
 			HttpClient client = new HttpClient()
@@ -140,14 +154,14 @@ namespace Kellphy.Warframe.MarketTool
 			{
 				foreach (var json in responseJson)
 				{
-					if (json.drops?.Any(t => t.location?.Contains(newLoka) == true) == true)
+					if (json.drops?.Any(t => t.location?.Contains(_syndicates[Syndicate.NewLoka], StringComparison.CurrentCultureIgnoreCase) is true) is true)
 					{
 						if (json.name != null && json.name.ToLower() != "sacrifice")
 						{
 							newLokaList.Add(json.name);
 						}
 					}
-					if (json.drops?.Any(t => t.location?.Contains(perrinSequence) == true) == true)
+					if (json.drops?.Any(t => t.location?.Contains(_syndicates[Syndicate.PerrinSequence], StringComparison.CurrentCultureIgnoreCase) is true) is true)
 					{
 						if (json.name != null)
 						{
@@ -157,10 +171,10 @@ namespace Kellphy.Warframe.MarketTool
 				}
 			}
 
-			syndicates.Add(newLoka, newLokaList.ToArray());
-			Console.WriteLine($"Found New Loka: {newLokaList.Count}");
-			syndicates.Add(perrinSequence, perrinSeqList.ToArray());
-			Console.WriteLine($"Found Perrin Sequence: {perrinSeqList.Count}");
+			syndicates.Add(_syndicates[Syndicate.NewLoka], newLokaList.ToArray());
+			$"Found New Loka: {newLokaList.Count}".WriteGoodMessage();
+			syndicates.Add(_syndicates[Syndicate.PerrinSequence], perrinSeqList.ToArray());
+			$"Found Perrin Sequence: {perrinSeqList.Count}".WriteGoodMessage();
 			return syndicates;
 		}
 
@@ -185,7 +199,7 @@ namespace Kellphy.Warframe.MarketTool
 			request.Headers.Add("accept", "application/json");
 			request.Headers.Add("platform", "pc");
 			request.Headers.Add("auth_type", "header");
-			var response = await client.SendAsync(request);
+			var response = await _client.SendAsync(request);
 			var responseBody = await response.Content.ReadAsStringAsync();
 			Regex rgxBody = new Regex("\"check_code\": \".*?\"");
 			string censoredResponse = rgxBody.Replace(responseBody, "\"check_code\": \"REDACTED\"");
@@ -214,7 +228,7 @@ namespace Kellphy.Warframe.MarketTool
 				{
 					if (item.id != null && item.item_name != null)
 					{
-						if (syndicateMods.Contains(item.item_name))
+						if (syndicateMods.Any(i => i.Equals(item.item_name, StringComparison.CurrentCultureIgnoreCase)))
 						{
 							itemList.Add(item.id, item.item_name);
 						}
@@ -224,15 +238,19 @@ namespace Kellphy.Warframe.MarketTool
 
 			if (itemList.Count != syndicateMods.Length)
 			{
-				Console.WriteLine("Difference of " + (syndicateMods.Length - itemList.Count));
+				$"Difference of {(syndicateMods.Length - itemList.Count)}".WriteWarningMessage();
 
 				foreach (var newItem in syndicateMods)
 				{
-					if (!itemList.Any(t => t.Value == newItem))
+					if (!itemList.Any(t => t.Value.Equals(newItem, StringComparison.CurrentCultureIgnoreCase)))
 					{
-						Console.WriteLine(newItem);
+						newItem.WriteWarningMessage();
 					}
 				}
+			}
+			else
+			{
+				$"All mods found!".WriteGoodMessage();
 			}
 
 			var orderIds = new List<string>();
@@ -243,7 +261,7 @@ namespace Kellphy.Warframe.MarketTool
 				{
 					orderIds.Add(orderId);
 				}
-				await Task.Delay(TimeSpan.FromSeconds(1)); //I don't want to spam WFM timer. Default: 250ms
+				await Task.Delay(TimeSpan.FromSeconds(1)); //I don't want to spam WFM. Default: 250ms
 			}
 			return orderIds;
 		}
@@ -262,20 +280,20 @@ namespace Kellphy.Warframe.MarketTool
 					{
 						item_id = itemId,
 						order_type = "sell",
-						platinum = platinum,
+						platinum = _platinum,
 						quantity = 1,
 						rank = 0,
 						visible = true
 					});
 
 					request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-					request.Headers.Add("Authorization", "JWT " + JWT);
+					request.Headers.Add("Authorization", "JWT " + _jwt);
 					request.Headers.Add("language", "en");
 					request.Headers.Add("accept", "application/json");
 					request.Headers.Add("platform", "pc");
 					request.Headers.Add("auth_type", "header");
 
-					var response = await client.SendAsync(request);
+					var response = await _client.SendAsync(request);
 					var responseBody = await response.Content.ReadAsStringAsync();
 
 					if (!response.IsSuccessStatusCode) throw new Exception(responseBody);
@@ -294,9 +312,7 @@ namespace Kellphy.Warframe.MarketTool
 			}
 			catch (Exception e)
 			{
-				Console.ForegroundColor = ConsoleColor.Red;
-				Console.WriteLine(e.Message);
-				Console.ForegroundColor = ConsoleColor.Gray;
+				e.Message.WriteErrorMessage();
 				return null;
 			}
 
@@ -318,13 +334,13 @@ namespace Kellphy.Warframe.MarketTool
 							Method = HttpMethod.Delete,
 						})
 						{
-							request.Headers.Add("Authorization", "JWT " + JWT);
+							request.Headers.Add("Authorization", "JWT " + _jwt);
 							request.Headers.Add("language", "en");
 							request.Headers.Add("accept", "application/json");
 							request.Headers.Add("platform", "pc");
 							request.Headers.Add("auth_type", "header");
 
-							var response = await client.SendAsync(request);
+							var response = await _client.SendAsync(request);
 							var responseBody = await response.Content.ReadAsStringAsync();
 
 							if (!response.IsSuccessStatusCode) throw new Exception(responseBody);
@@ -336,9 +352,7 @@ namespace Kellphy.Warframe.MarketTool
 					}
 					catch (Exception e)
 					{
-						Console.ForegroundColor = ConsoleColor.Red;
-						Console.WriteLine(e.Message);
-						Console.ForegroundColor = ConsoleColor.Gray;
+						e.Message.WriteErrorMessage();
 					}
 				}
 			}
@@ -350,7 +364,7 @@ namespace Kellphy.Warframe.MarketTool
 			{
 				if (!item.Key.ToLower().Contains("authorization")) continue;
 				var temp = item.Value.First();
-				JWT = temp[4..];
+				_jwt = temp[4..];
 				return;
 			}
 		}

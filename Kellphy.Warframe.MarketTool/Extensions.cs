@@ -2,6 +2,11 @@
 {
 	public static class Extensions
 	{
+		public static void WriteInfoMessage(this string message)
+		{
+			$"# {message}".WriteColoredMessage(ConsoleColor.Blue);
+		}
+
 		public static void WriteWarningMessage(this string message)
 		{
 			message.WriteColoredMessage(ConsoleColor.Yellow);

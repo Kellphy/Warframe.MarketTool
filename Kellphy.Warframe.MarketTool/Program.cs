@@ -8,7 +8,7 @@ namespace Kellphy.Warframe.MarketTool
 {
 	internal class Program
 	{
-
+		private static int _minimumApiWaitMsec = 250;
 #pragma warning disable CS8618 // Added in custom constructor
 		private static HttpClient _client;
 		private static string _jwt; // JWT is the security key, store this as email+pw combo
@@ -58,7 +58,7 @@ namespace Kellphy.Warframe.MarketTool
 			{
 				await Logic();
 
-				Console.WriteLine("--- Completed! Press any key to reset.");
+				"Completed! Press any key to reset.".WriteInfoMessage();
 				Console.ReadKey();
 				Console.Clear();
 			}
@@ -91,6 +91,7 @@ namespace Kellphy.Warframe.MarketTool
 				$"\n[3] {_syndicates[Syndicate.NewLoka]}" +
 				$"\n[4] {_syndicates[Syndicate.PerrinSequence]}" +
 				"\n[.] Clear");
+			Console.Write("Choice: ");
 			var choice = Console.ReadKey();
 			Console.WriteLine();
 
@@ -107,7 +108,7 @@ namespace Kellphy.Warframe.MarketTool
 					{
 						_platinum = newPlatinum;
 					}
-					Console.WriteLine("--- Using price: " + _platinum);
+					$"Using price: {_platinum}".WriteInfoMessage();
 					break;
 			}
 
@@ -261,7 +262,6 @@ namespace Kellphy.Warframe.MarketTool
 				{
 					orderIds.Add(orderId);
 				}
-				await Task.Delay(TimeSpan.FromSeconds(1)); //I don't want to spam WFM. Default: 250ms
 			}
 			return orderIds;
 		}
@@ -299,24 +299,25 @@ namespace Kellphy.Warframe.MarketTool
 					if (!response.IsSuccessStatusCode) throw new Exception(responseBody);
 					SetJWT(response.Headers);
 
-					Console.WriteLine("Add Order: " + response.StatusCode);
-
 					var responseOrder = JsonConvert.DeserializeObject<WFMOrder.Root>(responseBody);
-					if (responseOrder != null)
+					if (responseOrder is null)
 					{
-						var responseOrderId = responseOrder?.payload?.order?.id;
-						Console.WriteLine("Order Id: " + responseOrderId);
-						return responseOrderId;
+						throw new Exception($"Failed to deserialize: {responseBody}");
 					}
+
+					var responseOrderId = responseOrder?.payload?.order?.id;
+					Console.WriteLine($"Added Order: {response.StatusCode} | {responseOrderId}");
+
+					await Task.Delay(TimeSpan.FromSeconds(1)); //I don't want to spam WFM. Default: 250ms
+					return responseOrderId;
 				}
 			}
 			catch (Exception e)
 			{
 				e.Message.WriteErrorMessage();
+				await Task.Delay(_minimumApiWaitMsec); //I don't want to spam WFM. Default: 250ms
 				return null;
 			}
-
-			return null;
 		}
 
 		public static async Task DeleteOrders()
@@ -346,13 +347,14 @@ namespace Kellphy.Warframe.MarketTool
 							if (!response.IsSuccessStatusCode) throw new Exception(responseBody);
 							SetJWT(response.Headers);
 
-							Console.WriteLine("Delete Order: " + response.StatusCode);
-							await Task.Delay(500);
+							Console.WriteLine($"Deleted Order: {response.StatusCode} | {previousOrder}");
+							await Task.Delay(TimeSpan.FromMilliseconds(_minimumApiWaitMsec));
 						}
 					}
 					catch (Exception e)
 					{
 						e.Message.WriteErrorMessage();
+						await Task.Delay(TimeSpan.FromMilliseconds(_minimumApiWaitMsec));
 					}
 				}
 			}

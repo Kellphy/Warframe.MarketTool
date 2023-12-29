@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Newtonsoft.Json;
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -8,7 +9,8 @@ namespace Kellphy.Warframe.MarketTool
 {
 	internal class Program
 	{
-		private static int _minimumApiWaitMsec = 250;
+		private static TimeSpan _minApiTime = TimeSpan.FromMilliseconds(250);
+		private static TimeSpan _maxApiTime = TimeSpan.FromSeconds(1);
 #pragma warning disable CS8618 // Added in custom constructor
 		private static HttpClient _client;
 		private static string _jwt; // JWT is the security key, store this as email+pw combo
@@ -58,7 +60,7 @@ namespace Kellphy.Warframe.MarketTool
 			{
 				await Logic();
 
-				"Completed! Press any key to reset.".WriteInfoMessage();
+				"Completed! Press any key to restart.".WriteInfoMessage();
 				Console.ReadKey();
 				Console.Clear();
 			}
@@ -71,7 +73,7 @@ namespace Kellphy.Warframe.MarketTool
 				File.Create("orders.txt");
 			}
 
-			var response = await _client.GetAsync("https://api.warframe.market/v1/items");
+			var response = await _client.GetAsyncWaited("https://api.warframe.market/v1/items", _minApiTime);
 			var responseContent = await response.Content.ReadAsStringAsync();
 			var responseJson = JsonConvert.DeserializeObject<ItemList.Root>(responseContent);
 
@@ -90,12 +92,11 @@ namespace Kellphy.Warframe.MarketTool
 				$"\n[2] {_syndicates[Syndicate.PerrinSequence]} > {_syndicates[Syndicate.NewLoka]}" +
 				$"\n[3] {_syndicates[Syndicate.NewLoka]}" +
 				$"\n[4] {_syndicates[Syndicate.PerrinSequence]}" +
+				$"\n[5] Custom Orders" +
 				"\n[.] Clear");
 			Console.Write("Choice: ");
 			var choice = Console.ReadKey();
 			Console.WriteLine();
-
-			await DeleteOrders();
 
 			switch (choice.Key)
 			{
@@ -103,7 +104,8 @@ namespace Kellphy.Warframe.MarketTool
 				case ConsoleKey.D2:
 				case ConsoleKey.D3:
 				case ConsoleKey.D4:
-					Console.Write("Platinum for mods: ");
+				case ConsoleKey.D5:
+					Console.Write("Platinum price: ");
 					if (int.TryParse(Console.ReadLine(), out int newPlatinum))
 					{
 						_platinum = newPlatinum;
@@ -111,6 +113,8 @@ namespace Kellphy.Warframe.MarketTool
 					$"Using price: {_platinum}".WriteInfoMessage();
 					break;
 			}
+
+			await DeleteOrders();
 
 			var orderIds = new List<string>();
 			switch (choice.Key)
@@ -128,6 +132,14 @@ namespace Kellphy.Warframe.MarketTool
 					break;
 				case ConsoleKey.D4:
 					orderIds.AddRange(await AddItems(responseJson, modList[_syndicates[Syndicate.PerrinSequence]]));
+					break;
+				case ConsoleKey.D5:
+					var customOrdersFile = "custom-orders.txt";
+					if (!File.Exists(customOrdersFile))
+					{
+						File.Create(customOrdersFile).Close();
+					}
+					orderIds.AddRange(await AddItems(responseJson, File.ReadAllLines(customOrdersFile)));
 					break;
 			}
 
@@ -200,10 +212,10 @@ namespace Kellphy.Warframe.MarketTool
 			request.Headers.Add("accept", "application/json");
 			request.Headers.Add("platform", "pc");
 			request.Headers.Add("auth_type", "header");
-			var response = await _client.SendAsync(request);
+			var response = await _client.SendAsyncWaited(request, _minApiTime);
 			var responseBody = await response.Content.ReadAsStringAsync();
 			Regex rgxBody = new Regex("\"check_code\": \".*?\"");
-			string censoredResponse = rgxBody.Replace(responseBody, "\"check_code\": \"REDACTED\"");
+			string censoredResponseBody = rgxBody.Replace(responseBody, "\"check_code\": \"REDACTED\"");
 
 			Console.WriteLine("Login " + response.StatusCode);
 
@@ -215,7 +227,7 @@ namespace Kellphy.Warframe.MarketTool
 			{
 				Regex rgxEmail = new Regex("[a-zA-Z0-9]");
 				string censoredEmail = rgxEmail.Replace(email, "*");
-				throw new Exception("GetUserLogin, " + responseBody + $"Email: {censoredEmail}, Pw length: {password.Length}");
+				throw new Exception("GetUserLogin, " + censoredResponseBody + $"Email: {censoredEmail}, Pw length: {password.Length}");
 			}
 			request.Dispose();
 		}
@@ -293,7 +305,7 @@ namespace Kellphy.Warframe.MarketTool
 					request.Headers.Add("platform", "pc");
 					request.Headers.Add("auth_type", "header");
 
-					var response = await _client.SendAsync(request);
+					var response = await _client.SendAsyncWaited(request, _maxApiTime);
 					var responseBody = await response.Content.ReadAsStringAsync();
 
 					if (!response.IsSuccessStatusCode) throw new Exception(responseBody);
@@ -308,14 +320,12 @@ namespace Kellphy.Warframe.MarketTool
 					var responseOrderId = responseOrder?.payload?.order?.id;
 					Console.WriteLine($"Added Order: {response.StatusCode} | {responseOrderId}");
 
-					await Task.Delay(TimeSpan.FromSeconds(1)); //I don't want to spam WFM. Default: 250ms
 					return responseOrderId;
 				}
 			}
 			catch (Exception e)
 			{
 				e.Message.WriteErrorMessage();
-				await Task.Delay(_minimumApiWaitMsec); //I don't want to spam WFM. Default: 250ms
 				return null;
 			}
 		}
@@ -341,20 +351,18 @@ namespace Kellphy.Warframe.MarketTool
 							request.Headers.Add("platform", "pc");
 							request.Headers.Add("auth_type", "header");
 
-							var response = await _client.SendAsync(request);
+							var response = await _client.SendAsyncWaited(request, _minApiTime);
 							var responseBody = await response.Content.ReadAsStringAsync();
 
 							if (!response.IsSuccessStatusCode) throw new Exception(responseBody);
 							SetJWT(response.Headers);
 
 							Console.WriteLine($"Deleted Order: {response.StatusCode} | {previousOrder}");
-							await Task.Delay(TimeSpan.FromMilliseconds(_minimumApiWaitMsec));
 						}
 					}
 					catch (Exception e)
 					{
 						e.Message.WriteErrorMessage();
-						await Task.Delay(TimeSpan.FromMilliseconds(_minimumApiWaitMsec));
 					}
 				}
 			}
@@ -370,5 +378,6 @@ namespace Kellphy.Warframe.MarketTool
 				return;
 			}
 		}
+
 	}
 }

@@ -9,7 +9,7 @@ namespace Kellphy.Warframe.MarketTool
 {
 	internal class Program
 	{
-		private static TimeSpan _minApiTime = TimeSpan.FromMilliseconds(250);
+		private static TimeSpan _minApiTime = TimeSpan.FromMilliseconds(350);
 		private static TimeSpan _maxApiTime = TimeSpan.FromSeconds(1);
 #pragma warning disable CS8618 // Added in custom constructor
 		private static HttpClient _client;

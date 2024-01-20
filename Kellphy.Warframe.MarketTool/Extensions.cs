@@ -11,11 +11,18 @@ namespace Kellphy.Warframe.MarketTool
 		{
 			await Wait(waitTime);
 
-			Stopwatch stopwatch = Stopwatch.StartNew();
-			var response = await client.GetAsync(requestUri);
-			stopwatch.Stop();
+			var retryCounter = 10;
+			HttpResponseMessage? response;
 
-			$"[Responsed in {stopwatch.Elapsed.TotalMilliseconds}ms]".WriteDebugMessage();
+			do
+			{
+				Stopwatch stopwatch = Stopwatch.StartNew();
+				response = await client.GetAsync(requestUri);
+				stopwatch.Stop();
+				$"[Responsed in {stopwatch.Elapsed.TotalMilliseconds}ms] {response.StatusCode}".WriteDebugMessage();
+				retryCounter--;
+			}
+			while (retryCounter > 0 && !response.IsSuccessStatusCode);
 
 			return response;
 		}
@@ -24,11 +31,18 @@ namespace Kellphy.Warframe.MarketTool
 		{
 			await Wait(waitTime);
 
-			Stopwatch stopwatch = Stopwatch.StartNew();
-			var response = await client.SendAsync(request);
-			stopwatch.Stop();
+			var retryCounter = 10;
+			HttpResponseMessage? response;
 
-			$"[Responsed in {stopwatch.Elapsed.TotalMilliseconds}ms]".WriteDebugMessage();
+			do
+			{
+				Stopwatch stopwatch = Stopwatch.StartNew();
+				response = await client.SendAsync(request);
+				stopwatch.Stop();
+				$"[Responsed in {stopwatch.Elapsed.TotalMilliseconds}ms] {response.StatusCode}".WriteDebugMessage();
+				retryCounter--;
+			}
+			while (retryCounter > 0 && !response.IsSuccessStatusCode);
 
 			return response;
 		}

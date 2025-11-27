@@ -293,7 +293,7 @@ namespace Kellphy.Warframe.MarketTool
 						item_id = itemId,
 						order_type = "sell",
 						platinum = _platinum,
-						quantity = 1,
+						quantity = 5,
 						rank = 0,
 						visible = true
 					});

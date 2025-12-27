@@ -1,6 +1,9 @@
 ﻿using Microsoft.Extensions.Configuration;
+using Microsoft.VisualBasic;
 using Newtonsoft.Json;
+using SharpCompress.Compressors.LZMA;
 using System.Diagnostics;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -73,13 +76,19 @@ namespace Kellphy.Warframe.MarketTool
 				File.Create("orders.txt");
 			}
 
-			var response = await _client.GetAsyncWaited("https://api.warframe.market/v1/items", _minApiTime);
+			var response = await _client.GetAsyncWaited("https://api.warframe.market/v2/items", _minApiTime);
 			var responseContent = await response.Content.ReadAsStringAsync();
-			var responseJson = JsonConvert.DeserializeObject<ItemList.Root>(responseContent);
+			var responseJson = JsonConvert.DeserializeObject<ApiResponse<List<WfmItem>>>(responseContent);
 
 			if (responseJson is null)
 			{
 				"Null Response".WriteErrorMessage();
+				return;
+			}
+
+			if (responseJson.HasError)
+			{
+				$"API Error: {responseJson.GetErrorMessage()}".WriteErrorMessage();
 				return;
 			}
 
@@ -143,51 +152,82 @@ namespace Kellphy.Warframe.MarketTool
 					break;
 			}
 
-			File.WriteAllText("orders.txt", JsonConvert.SerializeObject(orderIds));
 			$"Added Orders: {orderIds.Count}".WriteGoodMessage();
 		}
 
 		private static async Task<Dictionary<string, string[]>> GetModList()
 		{
 			Dictionary<string, string[]> syndicates = new();
-			HttpClient client = new HttpClient()
+
+			try
 			{
-				BaseAddress = new Uri($"https://api.warframestat.us/mods")
-			};
-			client.DefaultRequestHeaders.Accept.Clear();
+				// Try api.warframestat.us first
+				var response = await _client.GetStringAsync("https://api.warframestat.us/mods");
+				var allMods = JsonConvert.DeserializeObject<List<WfStatMod>>(response) ?? new();
 
-			HttpResponseMessage response = new();
-			response = await client.GetAsync(client.BaseAddress.ToString());
-			var responseJson = JsonConvert.DeserializeObject<WFMods.Root[]>(await response.Content.ReadAsStringAsync());
+				var newLokaList = new List<string>();
+				var perrinSeqList = new List<string>();
 
-			var newLokaList = new List<string>();
-			var perrinSeqList = new List<string>();
-
-			if (responseJson != null)
-			{
-				foreach (var json in responseJson)
+				foreach (var mod in allMods)
 				{
-					if (json.drops?.Any(t => t.location?.Contains(_syndicates[Syndicate.NewLoka], StringComparison.CurrentCultureIgnoreCase) is true) is true)
+					if (mod.drops?.Any(d => d.location?.Contains(_syndicates[Syndicate.NewLoka], StringComparison.CurrentCultureIgnoreCase) == true) == true)
 					{
-						if (json.name != null && json.name.ToLower() != "sacrifice")
+						if (mod.name != null && !mod.name.Equals("Sacrifice", StringComparison.OrdinalIgnoreCase))
 						{
-							newLokaList.Add(json.name);
+							newLokaList.Add(mod.name);
 						}
 					}
-					if (json.drops?.Any(t => t.location?.Contains(_syndicates[Syndicate.PerrinSequence], StringComparison.CurrentCultureIgnoreCase) is true) is true)
+					if (mod.drops?.Any(d => d.location?.Contains(_syndicates[Syndicate.PerrinSequence], StringComparison.CurrentCultureIgnoreCase) == true) == true)
 					{
-						if (json.name != null)
+						if (mod.name != null)
 						{
-							perrinSeqList.Add(json.name);
+							perrinSeqList.Add(mod.name);
 						}
 					}
 				}
+
+				if (newLokaList.Count > 0 || perrinSeqList.Count > 0)
+				{
+					syndicates.Add(_syndicates[Syndicate.NewLoka], newLokaList.ToArray());
+					$"Found New Loka: {newLokaList.Count} (warframestat.us)".WriteGoodMessage();
+					syndicates.Add(_syndicates[Syndicate.PerrinSequence], perrinSeqList.ToArray());
+					$"Found Perrin Sequence: {perrinSeqList.Count} (warframestat.us)".WriteGoodMessage();
+					return syndicates;
+				}
+			}
+			catch (Exception ex)
+			{
+				$"warframestat.us failed: {ex.Message}".WriteErrorMessage();
 			}
 
-			syndicates.Add(_syndicates[Syndicate.NewLoka], newLokaList.ToArray());
-			$"Found New Loka: {newLokaList.Count}".WriteGoodMessage();
-			syndicates.Add(_syndicates[Syndicate.PerrinSequence], perrinSeqList.ToArray());
-			$"Found Perrin Sequence: {perrinSeqList.Count}".WriteGoodMessage();
+			// Fallback to local Docker server (warframe-items)
+			try
+			{
+				"Falling back to localhost:3000...".WriteErrorMessage();
+
+				var newLokaResponse = await _client.GetStringAsync("http://localhost:3000/api/mods/syndicate?syndicate=new_loka");
+				var newLokaMods = JsonConvert.DeserializeObject<List<WfItemMod>>(newLokaResponse) ?? new();
+				var newLokaList = newLokaMods.Select(m => m.name!).Where(n => !string.IsNullOrEmpty(n)).ToList();
+
+				var perrinResponse = await _client.GetStringAsync("http://localhost:3000/api/mods/syndicate?syndicate=perrin_sequence");
+				var perrinMods = JsonConvert.DeserializeObject<List<WfItemMod>>(perrinResponse) ?? new();
+				var perrinSeqList = perrinMods.Select(m => m.name!).Where(n => !string.IsNullOrEmpty(n)).ToList();
+
+				syndicates.Add(_syndicates[Syndicate.NewLoka], newLokaList.ToArray());
+				$"Found New Loka: {newLokaList.Count} (localhost)".WriteGoodMessage();
+				syndicates.Add(_syndicates[Syndicate.PerrinSequence], perrinSeqList.ToArray());
+				$"Found Perrin Sequence: {perrinSeqList.Count} (localhost)".WriteGoodMessage();
+				return syndicates;
+			}
+			catch (Exception ex)
+			{
+				$"localhost:3000 failed: {ex.Message}".WriteErrorMessage();
+			}
+
+			// Return empty if all sources fail
+			"All mod sources failed!".WriteErrorMessage();
+			syndicates.Add(_syndicates[Syndicate.NewLoka], Array.Empty<string>());
+			syndicates.Add(_syndicates[Syndicate.PerrinSequence], Array.Empty<string>());
 			return syndicates;
 		}
 
@@ -200,7 +240,7 @@ namespace Kellphy.Warframe.MarketTool
 				Method = HttpMethod.Post,
 			};
 
-			var content = JsonConvert.SerializeObject(new Request.UserLogin()
+			var content = JsonConvert.SerializeObject(new LoginRequest()
 			{
 				email = email,
 				password = password,
@@ -222,6 +262,34 @@ namespace Kellphy.Warframe.MarketTool
 			if (response.IsSuccessStatusCode)
 			{
 				SetJWT(response.Headers);
+
+				if (!string.IsNullOrEmpty(_jwt))
+				{
+					var requestMe = new HttpRequestMessage()
+					{
+						RequestUri = new Uri("https://api.warframe.market/v2/me"),
+						Method = HttpMethod.Get,
+					};
+
+					requestMe.Headers.Add("Authorization", "Bearer " + _jwt);
+					requestMe.Headers.Add("language", "en");
+					requestMe.Headers.Add("accept", "application/json");
+					requestMe.Headers.Add("platform", "pc");
+					requestMe.Headers.Add("auth_type", "header");
+
+					var responseMe = await _client.SendAsyncWaited(requestMe, _minApiTime);
+					var responseMeBody = await responseMe.Content.ReadAsStringAsync();
+					var lastWFMarketProfileData = JsonConvert.DeserializeObject<WFMarketProfileData>(responseMeBody);
+					if (lastWFMarketProfileData?.data?.verification != true)
+					{
+						throw new Exception("GetUserLogin, Account not verified.");
+					}
+					else
+					{
+						Console.WriteLine("Status " + response.StatusCode);
+					}
+						requestMe.Dispose();
+				}
 			}
 			else
 			{
@@ -229,21 +297,22 @@ namespace Kellphy.Warframe.MarketTool
 				string censoredEmail = rgxEmail.Replace(email, "*");
 				throw new Exception("GetUserLogin, " + censoredResponseBody + $"Email: {censoredEmail}, Pw length: {password.Length}");
 			}
+
 			request.Dispose();
 		}
 
-		private static async Task<List<string>> AddItems(ItemList.Root? responseJson, string[] syndicateMods)
+		private static async Task<List<string>> AddItems(ApiResponse<List<WfmItem>>? responseJson, string[] syndicateMods)
 		{
 			var itemList = new Dictionary<string, string>();
-			if (responseJson?.payload?.items != null)
+			if (responseJson?.data != null)
 			{
-				foreach (var item in responseJson.payload.items)
+				foreach (var item in responseJson.data)
 				{
-					if (item.id != null && item.item_name != null)
+					if (item.id != null && item.name != null)
 					{
-						if (syndicateMods.Any(i => i.Equals(item.item_name, StringComparison.CurrentCultureIgnoreCase)))
+						if (syndicateMods.Any(i => i.Equals(item.name, StringComparison.CurrentCultureIgnoreCase)))
 						{
-							itemList.Add(item.id, item.item_name);
+							itemList.Add(item.id, item.name);
 						}
 					}
 				}
@@ -273,9 +342,15 @@ namespace Kellphy.Warframe.MarketTool
 				if (orderId != null)
 				{
 					orderIds.Add(orderId);
+					SaveOrders(orderIds);
 				}
 			}
 			return orderIds;
+		}
+
+		private static void SaveOrders(List<string> orderIds)
+		{
+			File.WriteAllText("orders.txt", JsonConvert.SerializeObject(orderIds));
 		}
 
 		public static async Task<string?> AddOrder(string itemId)
@@ -284,22 +359,22 @@ namespace Kellphy.Warframe.MarketTool
 			{
 				using (var request = new HttpRequestMessage()
 				{
-					RequestUri = new Uri("https://api.warframe.market/v1/profile/orders"),
+					RequestUri = new Uri("https://api.warframe.market/v2/order"),
 					Method = HttpMethod.Post,
 				})
 				{
-					var json = JsonConvert.SerializeObject(new Request.OrderMod()
+					var json = JsonConvert.SerializeObject(new CreateOrderRequest()
 					{
-						item_id = itemId,
-						order_type = "sell",
+						itemId = itemId,
+						type = "sell",
+						visible = true,
 						platinum = _platinum,
 						quantity = 5,
-						rank = 0,
-						visible = true
+						rank = 0
 					});
 
 					request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-					request.Headers.Add("Authorization", "JWT " + _jwt);
+					request.Headers.Add("Authorization", "Bearer " + _jwt);
 					request.Headers.Add("language", "en");
 					request.Headers.Add("accept", "application/json");
 					request.Headers.Add("platform", "pc");
@@ -311,13 +386,18 @@ namespace Kellphy.Warframe.MarketTool
 					if (!response.IsSuccessStatusCode) throw new Exception(responseBody);
 					SetJWT(response.Headers);
 
-					var responseOrder = JsonConvert.DeserializeObject<WFMOrder.Root>(responseBody);
+					var responseOrder = JsonConvert.DeserializeObject<ApiResponse<WfmOrder>>(responseBody);
 					if (responseOrder is null)
 					{
 						throw new Exception($"Failed to deserialize: {responseBody}");
 					}
 
-					var responseOrderId = responseOrder?.payload?.order?.id;
+					if (responseOrder.HasError)
+					{
+						throw new ApiException($"API Error: {responseOrder.GetErrorMessage()}", responseOrder.apiVersion, responseOrder.error);
+					}
+
+					var responseOrderId = responseOrder.data?.id;
 					Console.WriteLine($"Added Order: {response.StatusCode} | {responseOrderId}");
 
 					return responseOrderId;
@@ -341,7 +421,7 @@ namespace Kellphy.Warframe.MarketTool
 					{
 						using (var request = new HttpRequestMessage()
 						{
-							RequestUri = new Uri($"https://api.warframe.market/v1/profile/orders/{previousOrder}"),
+							RequestUri = new Uri($"https://api.warframe.market/v2/order/{previousOrder}"),
 							Method = HttpMethod.Delete,
 						})
 						{

@@ -425,7 +425,7 @@ namespace Kellphy.Warframe.MarketTool
 							Method = HttpMethod.Delete,
 						})
 						{
-							request.Headers.Add("Authorization", "JWT " + _jwt);
+							request.Headers.Add("Authorization", "Bearer " + _jwt);
 							request.Headers.Add("language", "en");
 							request.Headers.Add("accept", "application/json");
 							request.Headers.Add("platform", "pc");
@@ -445,6 +445,8 @@ namespace Kellphy.Warframe.MarketTool
 						e.Message.WriteErrorMessage();
 					}
 				}
+
+				File.Create("orders.txt");
 			}
 		}
 

@@ -61,9 +61,17 @@ namespace Kellphy.Warframe.MarketTool
 		{
 			while (true)
 			{
-				await Logic();
+				try
+				{
+					await Logic();
+					"Completed! Press any key to restart.".WriteInfoMessage();
+				}
+				catch (Exception ex)
+				{
+					$"Error: {ex.Message}".WriteErrorMessage();
+					"Press any key to restart.".WriteInfoMessage();
+				}
 
-				"Completed! Press any key to restart.".WriteInfoMessage();
 				Console.ReadKey();
 				Console.Clear();
 			}
@@ -129,18 +137,26 @@ namespace Kellphy.Warframe.MarketTool
 			switch (choice.Key)
 			{
 				case ConsoleKey.D1:
-					orderIds.AddRange(await AddItems(responseJson, modList[_syndicates[Syndicate.NewLoka]]));
-					orderIds.AddRange(await AddItems(responseJson, modList[_syndicates[Syndicate.PerrinSequence]]));
+					var newLokaMods = modList[_syndicates[Syndicate.NewLoka]]
+						.Take(100).ToArray();
+					var perrinModsExcludingNewLoka = modList[_syndicates[Syndicate.PerrinSequence]]
+						.Except(newLokaMods).Take(100 - newLokaMods.Length).ToArray();
+					orderIds.AddRange(await AddItems(responseJson, newLokaMods));
+					orderIds.AddRange(await AddItems(responseJson, perrinModsExcludingNewLoka));
 					break;
 				case ConsoleKey.D2:
-					orderIds.AddRange(await AddItems(responseJson, modList[_syndicates[Syndicate.PerrinSequence]]));
-					orderIds.AddRange(await AddItems(responseJson, modList[_syndicates[Syndicate.NewLoka]]));
+					var perrinMods = modList[_syndicates[Syndicate.PerrinSequence]]
+						.Take(100).ToArray();
+					var newLokaModsExcludingPerrin = modList[_syndicates[Syndicate.NewLoka]]
+						.Except(perrinMods).Take(100 - perrinMods.Length).ToArray();
+					orderIds.AddRange(await AddItems(responseJson, perrinMods));
+					orderIds.AddRange(await AddItems(responseJson, newLokaModsExcludingPerrin));
 					break;
 				case ConsoleKey.D3:
-					orderIds.AddRange(await AddItems(responseJson, modList[_syndicates[Syndicate.NewLoka]]));
+					orderIds.AddRange(await AddItems(responseJson, modList[_syndicates[Syndicate.NewLoka]].Take(100).ToArray()));
 					break;
 				case ConsoleKey.D4:
-					orderIds.AddRange(await AddItems(responseJson, modList[_syndicates[Syndicate.PerrinSequence]]));
+					orderIds.AddRange(await AddItems(responseJson, modList[_syndicates[Syndicate.PerrinSequence]].Take(100).ToArray()));
 					break;
 				case ConsoleKey.D5:
 					var customOrdersFile = "custom-orders.txt";
@@ -148,7 +164,7 @@ namespace Kellphy.Warframe.MarketTool
 					{
 						File.Create(customOrdersFile).Close();
 					}
-					orderIds.AddRange(await AddItems(responseJson, File.ReadAllLines(customOrdersFile)));
+					orderIds.AddRange(await AddItems(responseJson, File.ReadAllLines(customOrdersFile).Take(100).ToArray()));
 					break;
 			}
 
@@ -342,15 +358,15 @@ namespace Kellphy.Warframe.MarketTool
 				if (orderId != null)
 				{
 					orderIds.Add(orderId);
-					SaveOrders(orderIds);
+					SaveOrder(orderId);
 				}
 			}
 			return orderIds;
 		}
 
-		private static void SaveOrders(List<string> orderIds)
+		private static void SaveOrder(string orderId)
 		{
-			File.WriteAllText("orders.txt", JsonConvert.SerializeObject(orderIds));
+			File.AppendAllText("orders.txt", orderId + Environment.NewLine);
 		}
 
 		public static async Task<string?> AddOrder(string itemId)
@@ -412,8 +428,8 @@ namespace Kellphy.Warframe.MarketTool
 
 		public static async Task DeleteOrders()
 		{
-			var previousOrders = JsonConvert.DeserializeObject<List<string>>(File.ReadAllText("orders.txt"));
-			if (previousOrders != null)
+			var previousOrders = File.ReadAllLines("orders.txt").Where(line => !string.IsNullOrWhiteSpace(line)).ToList();
+			if (previousOrders.Count > 0)
 			{
 				foreach (var previousOrder in previousOrders)
 				{
@@ -446,7 +462,7 @@ namespace Kellphy.Warframe.MarketTool
 					}
 				}
 
-				File.Create("orders.txt");
+				File.WriteAllText("orders.txt", string.Empty);
 			}
 		}
 

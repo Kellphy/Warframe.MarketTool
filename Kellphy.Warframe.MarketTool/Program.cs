@@ -171,6 +171,52 @@ namespace Kellphy.Warframe.MarketTool
 			$"Added Orders: {orderIds.Count}".WriteGoodMessage();
 		}
 
+		private static readonly Dictionary<string, HashSet<string>> _syndicateAugments = new(StringComparer.OrdinalIgnoreCase)
+		{
+			{ "New Loka", new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
+				"Elusive Retribution", "Endless Lullaby", "Reactive Storm",
+				"Duality", "Calm & Frenzy", "Peaceful Provocation", "Energy Transfer",
+				"Shattered Storm", "Mending Splinters", "Spectrosiphon",
+				"Viral Tempest", "Tidal Impunity", "Rousing Plunder", "Pilfering Swarm",
+				"Omikuji's Fortune",
+				"Volatile Recompense", "Wrath of Ukko",
+				"Valence Formation", "Swift Bite", "Lingering Transmutation",
+				"Greedy Pull", "Magnetized Discharge", "Counter Pulse", "Fracturing Crush",
+				"Mind Freak", "Pacifying Bolts", "Chaos Sphere", "Assimilate",
+				"Smite Infusion", "Hallowed Eruption", "Phoenix Renewal", "Hallowed Reckoning",
+				"Partitioned Mallet", "Conductor",
+				"Axios Javelineers", "Tharros Lethality", "Intrepid Stand",
+				"Spellbound Harvest", "Beguiling Lantern", "Razorwing Blitz", "Ironclad Flight",
+				"Pool of Life", "Vampire Leech", "Abating Link", "Champion's Blessing",
+				"Swing Line", "Eternal War", "Prolonged Paralysis", "Enraged", "Hysterical Assault",
+				"Fused Reservoir", "Critical Surge", "Cataclysmic Gate",
+				"Celestial Stomp", "Enveloping Cloud", "Primal Rage",
+				"Merulina Guardian", "Loyal Merulina", "Surging Blades",
+				"Target Fixation", "Airburst Rounds", "Jet Stream", "Funnel Clouds", "Anchored Glide",
+			}},
+			{ "Perrin Sequence", new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
+				"Sonic Fracture", "Resonance", "Savage Silence", "Resonating Quake",
+				"Razor Mortar",
+				"Everlasting Ward", "Guardian Armor", "Vexing Retaliation", "Guided Effigy",
+				"Spectral Spirit",
+				"Mach Crash", "Thermal Transfer",
+				"Coil Recharge", "Cathode Current", "Conductive Sphere", "Reverse Rotorswell",
+				"Balefire Surge", "Blazing Pillage", "Aegis Gale",
+				"Elemental Sandstorm", "Negation Armor", "Desiccation's Curse",
+				"Empowered Quiver", "Piercing Navigator", "Infiltrate", "Concentrated Arrow",
+				"Greedy Pull", "Magnetized Discharge", "Counter Pulse", "Fracturing Crush",
+				"Soul Survivor", "Creeping Terrify", "Despoil", "Shield of Shadows",
+				"Abundant Mutation", "Teeming Virulence", "Larva Burst", "Parasitic Vitality", "Insatiable",
+				"Repair Dispensary", "Temporal Erosion", "Temporal Artillery",
+				"Thrall Pact", "Mesmer Shield", "Blinding Reave",
+				"Ironclad Charge", "Iron Shrapnel", "Piercing Roar", "Reinforcing Stomp",
+				"Shadow Haze", "Dark Propagation",
+				"Pool of Life", "Vampire Leech", "Abating Link", "Champion's Blessing",
+				"Swing Line", "Eternal War", "Prolonged Paralysis", "Enraged", "Hysterical Assault",
+				"Tesla Bank", "Photon Repeater", "Enduring Bastille",
+			}},
+		};
+
 		private static async Task<Dictionary<string, string[]>> GetModList()
 		{
 			Dictionary<string, string[]> syndicates = new();
@@ -199,6 +245,23 @@ namespace Kellphy.Warframe.MarketTool
 						{
 							perrinSeqList.Add(mod.name);
 						}
+					}
+				}
+
+				// Fallback: if drops data is missing, use static syndicate mapping with isAugment check
+				if (newLokaList.Count == 0 && perrinSeqList.Count == 0 && allMods.Count > 0)
+				{
+					"warframestat.us has no drops data, using static syndicate mapping...".WriteErrorMessage();
+
+					foreach (var mod in allMods)
+					{
+						if (mod.name == null) continue;
+						if (mod.name.Equals("Sacrifice", StringComparison.OrdinalIgnoreCase)) continue;
+
+						if (_syndicateAugments[_syndicates[Syndicate.NewLoka]].Contains(mod.name))
+							newLokaList.Add(mod.name);
+						if (_syndicateAugments[_syndicates[Syndicate.PerrinSequence]].Contains(mod.name))
+							perrinSeqList.Add(mod.name);
 					}
 				}
 

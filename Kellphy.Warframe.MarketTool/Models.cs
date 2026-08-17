@@ -177,6 +177,7 @@ internal class WfStatMod
 {
 	public string? name { get; set; }
 	public string? uniqueName { get; set; }
+	public bool? isAugment { get; set; }
 	public List<WfStatLevelStats>? levelStats { get; set; }
 	public List<WfStatDrop>? drops { get; set; }
 }

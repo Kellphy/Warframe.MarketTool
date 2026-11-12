@@ -9,22 +9,32 @@ namespace Kellphy.Warframe.MarketTool
 
 		public static async Task<HttpResponseMessage> GetAsyncWaited(this HttpClient client, string requestUri, TimeSpan waitTime)
 		{
-			await Wait(waitTime);
-
 			var retryCounter = 10;
 			HttpResponseMessage? response;
 
 			do
 			{
+				await Wait(waitTime);
 				Stopwatch stopwatch = Stopwatch.StartNew();
 				response = await client.GetAsync(requestUri);
 				stopwatch.Stop();
 				$"[Responsed in {stopwatch.Elapsed.TotalMilliseconds}ms] {response.StatusCode}".WriteDebugMessage();
 				retryCounter--;
-			}
-			while (retryCounter > 0 && !response.IsSuccessStatusCode);
+				if (response.IsSuccessStatusCode)
+				{
+					return response;
+				}
 
-			return response;
+				var statusCode = response.StatusCode;
+				response.Dispose();
+				if (retryCounter == 0 || (statusCode != System.Net.HttpStatusCode.RequestTimeout &&
+					statusCode != System.Net.HttpStatusCode.TooManyRequests && (int)statusCode < 500))
+				{
+					throw new HttpRequestException(
+						$"GET {requestUri} failed: HTTP {(int)statusCode} ({statusCode}).", null, statusCode);
+				}
+			}
+			while (true);
 		}
 
 		public static async Task<HttpResponseMessage> SendAsyncWaited(this HttpClient client, HttpRequestMessage request, TimeSpan waitTime)

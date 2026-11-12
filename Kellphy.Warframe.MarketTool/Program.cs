@@ -41,6 +41,8 @@ namespace Kellphy.Warframe.MarketTool
 				UseCookies = false
 			};
 			_client = new HttpClient(handler);
+			_client.DefaultRequestHeaders.UserAgent.ParseAdd("Kellphy.Warframe.MarketTool/1.0");
+			_client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 			_jwt = string.Empty;
 
 			var configuration = new ConfigurationBuilder()
@@ -102,7 +104,7 @@ namespace Kellphy.Warframe.MarketTool
 
 			await Login(_email, _password);
 
-			var modList = await GetModList();
+			var modList = await GetModList(responseJson.data?.Select(i => i.name).OfType<string>() ?? Enumerable.Empty<string>());
 
 			Console.WriteLine(
 				$"[1] {_syndicates[Syndicate.NewLoka]} > {_syndicates[Syndicate.PerrinSequence]}" +
@@ -193,9 +195,11 @@ namespace Kellphy.Warframe.MarketTool
 				"Celestial Stomp", "Enveloping Cloud", "Primal Rage",
 				"Merulina Guardian", "Loyal Merulina", "Surging Blades",
 				"Target Fixation", "Airburst Rounds", "Jet Stream", "Funnel Clouds", "Anchored Glide",
+				"Kumihimo Loading", "Rhythm Guard",
+				"Winds of Purity", "Disarming Purity", "Bright Purity", "Lasting Purity",
 			}},
 			{ "Perrin Sequence", new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
-				"Sonic Fracture", "Resonance", "Savage Silence", "Resonating Quake",
+				"Sonic Siphon", "Resonance", "Savage Silence", "Gaseous Quake",
 				"Razor Mortar",
 				"Everlasting Ward", "Guardian Armor", "Vexing Retaliation", "Guided Effigy",
 				"Spectral Spirit",
@@ -214,16 +218,99 @@ namespace Kellphy.Warframe.MarketTool
 				"Pool of Life", "Vampire Leech", "Abating Link", "Champion's Blessing",
 				"Swing Line", "Eternal War", "Prolonged Paralysis", "Enraged", "Hysterical Assault",
 				"Tesla Bank", "Photon Repeater", "Enduring Bastille",
+				"Afterburn", "Reroot Rampage",
+				"Toxic Sequence", "Deadly Sequence", "Voltage Sequence", "Sequence Burn",
 			}},
 		};
 
-		private static async Task<Dictionary<string, string[]>> GetModList()
+		private static readonly Dictionary<Syndicate, string> _wikiPages = new()
+		{
+			{ Syndicate.NewLoka, "New_Loka" },
+			{ Syndicate.PerrinSequence, "The_Perrin_Sequence" }
+		};
+
+		// Wiki offering names that differ from warframe.market item names.
+		private static readonly Dictionary<string, string> _wikiNameAliases = new(StringComparer.OrdinalIgnoreCase)
+		{
+			{ "Repelling Bastille", "Enduring Bastille" },
+			{ "Resonating Quake", "Gaseous Quake" }
+		};
+
+		private static readonly Regex _wikiModOffer = new(@"\{\{SynOfferBox\|[^|}]*Mod\.png\|([^|}]+)\|", RegexOptions.IgnoreCase);
+
+		private static async Task<Dictionary<string, string[]>?> GetWikiModList(IEnumerable<string> marketItemNames)
+		{
+			var marketNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+			foreach (var name in marketItemNames)
+			{
+				marketNames.TryAdd(name, name);
+			}
+
+			var syndicates = new Dictionary<string, string[]>();
+			foreach (var (syndicate, page) in _wikiPages)
+			{
+				var wikitext = await _client.GetStringAsync($"https://wiki.warframe.com/w/{page}?action=raw");
+				var mods = new List<string>();
+				var unmatched = new List<string>();
+
+				foreach (Match match in _wikiModOffer.Matches(wikitext))
+				{
+					var name = match.Groups[1].Value.Replace('_', ' ').Trim();
+					if (_wikiNameAliases.TryGetValue(name, out var alias))
+					{
+						name = alias;
+					}
+
+					if (marketNames.TryGetValue(name, out var marketName))
+					{
+						if (!mods.Contains(marketName))
+						{
+							mods.Add(marketName);
+						}
+					}
+					else
+					{
+						unmatched.Add(name);
+					}
+				}
+
+				if (mods.Count == 0)
+				{
+					$"wiki: no {_syndicates[syndicate]} mod offerings found".WriteErrorMessage();
+					return null;
+				}
+
+				if (unmatched.Count > 0)
+				{
+					$"wiki: {_syndicates[syndicate]} offerings not on warframe.market: {string.Join(", ", unmatched)}".WriteWarningMessage();
+				}
+
+				syndicates.Add(_syndicates[syndicate], mods.ToArray());
+				$"Found {_syndicates[syndicate]}: {mods.Count} (wiki)".WriteGoodMessage();
+			}
+
+			return syndicates;
+		}
+
+		private static async Task<Dictionary<string, string[]>> GetModList(IEnumerable<string> marketItemNames)
 		{
 			Dictionary<string, string[]> syndicates = new();
 
 			try
 			{
-				// Try api.warframestat.us first
+				var wikiMods = await GetWikiModList(marketItemNames);
+				if (wikiMods != null)
+				{
+					return wikiMods;
+				}
+			}
+			catch (Exception ex)
+			{
+				$"wiki failed: {ex.Message}".WriteErrorMessage();
+			}
+
+			try
+			{
 				var response = await _client.GetStringAsync("https://api.warframestat.us/mods");
 				var allMods = JsonConvert.DeserializeObject<List<WfStatMod>>(response) ?? new();
 

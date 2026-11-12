@@ -39,22 +39,51 @@ namespace Kellphy.Warframe.MarketTool
 
 		public static async Task<HttpResponseMessage> SendAsyncWaited(this HttpClient client, HttpRequestMessage request, TimeSpan waitTime)
 		{
-			await Wait(waitTime);
-
+			// An HttpRequestMessage can only be sent once, so retries send a copy.
+			var body = request.Content == null ? null : await request.Content.ReadAsByteArrayAsync();
 			var retryCounter = 10;
-			HttpResponseMessage? response;
+			var attempt = request;
 
-			do
+			while (true)
 			{
+				await Wait(waitTime);
 				Stopwatch stopwatch = Stopwatch.StartNew();
-				response = await client.SendAsync(request);
+				var response = await client.SendAsync(attempt);
 				stopwatch.Stop();
 				$"[Responsed in {stopwatch.Elapsed.TotalMilliseconds}ms] {response.StatusCode}".WriteDebugMessage();
 				retryCounter--;
-			}
-			while (retryCounter > 0 && !response.IsSuccessStatusCode);
 
-			return response;
+				var statusCode = response.StatusCode;
+				var isTransient = statusCode == System.Net.HttpStatusCode.RequestTimeout ||
+					statusCode == System.Net.HttpStatusCode.TooManyRequests || (int)statusCode >= 500;
+				if (response.IsSuccessStatusCode || !isTransient || retryCounter == 0)
+				{
+					return response;
+				}
+
+				response.Dispose();
+				attempt = CloneRequest(request, body);
+			}
+		}
+
+		private static HttpRequestMessage CloneRequest(HttpRequestMessage request, byte[]? body)
+		{
+			var clone = new HttpRequestMessage(request.Method, request.RequestUri) { Version = request.Version };
+			foreach (var header in request.Headers)
+			{
+				clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
+			}
+
+			if (body != null)
+			{
+				clone.Content = new ByteArrayContent(body);
+				foreach (var header in request.Content!.Headers)
+				{
+					clone.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+				}
+			}
+
+			return clone;
 		}
 
 		private static async Task Wait(TimeSpan waitTime)

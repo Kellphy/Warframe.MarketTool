@@ -76,6 +76,7 @@ public class WfmItem
 	public string? gameRef { get; set; }
 	public List<string>? tags { get; set; }
 	public int? maxRank { get; set; }
+	public List<string>? subtypes { get; set; }
 	public WfmI18n? i18n { get; set; }
 
 	public string? name => i18n?.en?.name;
@@ -101,6 +102,7 @@ public class WfmOrder
 	public int? quantity { get; set; }
 	public int? perTrade { get; set; }
 	public int? rank { get; set; }
+	public string? subtype { get; set; }
 	public bool? visible { get; set; }
 	public DateTime? createdAt { get; set; }
 	public DateTime? updatedAt { get; set; }
@@ -176,6 +178,8 @@ internal class CreateOrderRequest
 	public int? platinum { get; set; }
 	public int? quantity { get; set; }
 	public int? rank { get; set; }
+	[Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+	public string? subtype { get; set; }
 }
 
 internal class LoginRequest

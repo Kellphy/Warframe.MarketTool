@@ -247,7 +247,7 @@ namespace Kellphy.Warframe.MarketTool
 					progress++;
 					try
 					{
-						var price = await GetMarketPrice(item.slug!);
+						var price = await GetMarketPrice(item.slug!, GetOrderSubtype(item));
 						cache[item.slug!] = new PriceCacheEntry { platinum = price, updatedAt = DateTime.UtcNow };
 						var line = $"[{progress}/{stale.Count}] {item.name}: {(price?.ToString() ?? "no sell orders")}";
 						if (price != null)
@@ -284,7 +284,18 @@ namespace Kellphy.Warframe.MarketTool
 			return sorted;
 		}
 
-		private static async Task<int?> GetMarketPrice(string slug)
+		// Items with variants (e.g. "regular"/"atragraph" augments) require a subtype on orders.
+		private static string? GetOrderSubtype(WfmItem item)
+		{
+			if (item.subtypes == null || item.subtypes.Count == 0)
+			{
+				return null;
+			}
+
+			return item.subtypes.FirstOrDefault(s => s.Equals("regular", StringComparison.OrdinalIgnoreCase)) ?? item.subtypes[0];
+		}
+
+		private static async Task<int?> GetMarketPrice(string slug, string? subtype)
 		{
 			using var response = await _client.GetAsyncWaited($"https://api.warframe.market/v2/orders/item/{slug}", _minApiTime);
 			var responseContent = await response.Content.ReadAsStringAsync();
@@ -295,7 +306,8 @@ namespace Kellphy.Warframe.MarketTool
 			}
 
 			var sellOrders = orders?.data?
-				.Where(o => o.type == "sell" && o.visible != false && (o.rank ?? 0) == 0 && o.platinum != null)
+				.Where(o => o.type == "sell" && o.visible != false && (o.rank ?? 0) == 0 && o.platinum != null
+					&& (subtype == null || o.subtype == null || o.subtype.Equals(subtype, StringComparison.OrdinalIgnoreCase)))
 				.ToList() ?? new();
 			var onlineSellOrders = sellOrders
 				.Where(o => o.user?.status == "ingame" || o.user?.status == "online")
@@ -614,7 +626,7 @@ namespace Kellphy.Warframe.MarketTool
 			var orderIds = new List<string>();
 			foreach (var item in items)
 			{
-				var orderId = await AddOrder(item.id!);
+				var orderId = await AddOrder(item.id!, item.name, GetOrderSubtype(item));
 				if (orderId != null)
 				{
 					orderIds.Add(orderId);
@@ -629,7 +641,7 @@ namespace Kellphy.Warframe.MarketTool
 			File.AppendAllText("orders.txt", orderId + Environment.NewLine);
 		}
 
-		public static async Task<string?> AddOrder(string itemId)
+		public static async Task<string?> AddOrder(string itemId, string? itemName = null, string? subtype = null)
 		{
 			try
 			{
@@ -646,7 +658,8 @@ namespace Kellphy.Warframe.MarketTool
 						visible = true,
 						platinum = _platinum,
 						quantity = 5,
-						rank = 0
+						rank = 0,
+						subtype = subtype
 					});
 
 					request.Content = new StringContent(json, Encoding.UTF8, "application/json");
@@ -659,7 +672,7 @@ namespace Kellphy.Warframe.MarketTool
 					var response = await _client.SendAsyncWaited(request, _maxApiTime);
 					var responseBody = await response.Content.ReadAsStringAsync();
 
-					if (!response.IsSuccessStatusCode) throw new Exception(responseBody);
+					if (!response.IsSuccessStatusCode) throw new Exception($"HTTP {(int)response.StatusCode} {response.StatusCode}: {responseBody}");
 					SetJWT(response.Headers);
 
 					var responseOrder = JsonConvert.DeserializeObject<ApiResponse<WfmOrder>>(responseBody);
@@ -674,14 +687,14 @@ namespace Kellphy.Warframe.MarketTool
 					}
 
 					var responseOrderId = responseOrder.data?.id;
-					Console.WriteLine($"Added Order: {response.StatusCode} | {responseOrderId}");
+					Console.WriteLine($"Added Order: {response.StatusCode} | {responseOrderId} | {itemName}");
 
 					return responseOrderId;
 				}
 			}
 			catch (Exception e)
 			{
-				e.Message.WriteErrorMessage();
+				$"Failed Order: {itemName ?? itemId} | {e.Message}".WriteErrorMessage();
 				return null;
 			}
 		}

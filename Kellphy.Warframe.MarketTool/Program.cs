@@ -107,11 +107,10 @@ namespace Kellphy.Warframe.MarketTool
 			var modList = await GetModList(responseJson.data?.Select(i => i.name).OfType<string>() ?? Enumerable.Empty<string>());
 
 			Console.WriteLine(
-				$"[1] {_syndicates[Syndicate.NewLoka]} > {_syndicates[Syndicate.PerrinSequence]}" +
-				$"\n[2] {_syndicates[Syndicate.PerrinSequence]} > {_syndicates[Syndicate.NewLoka]}" +
-				$"\n[3] {_syndicates[Syndicate.NewLoka]}" +
-				$"\n[4] {_syndicates[Syndicate.PerrinSequence]}" +
-				$"\n[5] Custom Orders" +
+				$"[1] {_syndicates[Syndicate.NewLoka]} + {_syndicates[Syndicate.PerrinSequence]}" +
+				$"\n[2] {_syndicates[Syndicate.NewLoka]}" +
+				$"\n[3] {_syndicates[Syndicate.PerrinSequence]}" +
+				$"\n[4] Custom Orders" +
 				"\n[.] Clear");
 			Console.Write("Choice: ");
 			var choice = Console.ReadKey();
@@ -123,7 +122,6 @@ namespace Kellphy.Warframe.MarketTool
 				case ConsoleKey.D2:
 				case ConsoleKey.D3:
 				case ConsoleKey.D4:
-				case ConsoleKey.D5:
 					Console.Write("Platinum price: ");
 					if (int.TryParse(Console.ReadLine(), out int newPlatinum))
 					{
@@ -135,42 +133,186 @@ namespace Kellphy.Warframe.MarketTool
 
 			await DeleteOrders();
 
-			var orderIds = new List<string>();
+			IEnumerable<string>? modsToList = null;
 			switch (choice.Key)
 			{
 				case ConsoleKey.D1:
-					var newLokaMods = modList[_syndicates[Syndicate.NewLoka]]
-						.Take(100).ToArray();
-					var perrinModsExcludingNewLoka = modList[_syndicates[Syndicate.PerrinSequence]]
-						.Except(newLokaMods).Take(100 - newLokaMods.Length).ToArray();
-					orderIds.AddRange(await AddItems(responseJson, newLokaMods));
-					orderIds.AddRange(await AddItems(responseJson, perrinModsExcludingNewLoka));
+					modsToList = modList[_syndicates[Syndicate.NewLoka]]
+						.Concat(modList[_syndicates[Syndicate.PerrinSequence]]);
 					break;
 				case ConsoleKey.D2:
-					var perrinMods = modList[_syndicates[Syndicate.PerrinSequence]]
-						.Take(100).ToArray();
-					var newLokaModsExcludingPerrin = modList[_syndicates[Syndicate.NewLoka]]
-						.Except(perrinMods).Take(100 - perrinMods.Length).ToArray();
-					orderIds.AddRange(await AddItems(responseJson, perrinMods));
-					orderIds.AddRange(await AddItems(responseJson, newLokaModsExcludingPerrin));
+					modsToList = modList[_syndicates[Syndicate.NewLoka]];
 					break;
 				case ConsoleKey.D3:
-					orderIds.AddRange(await AddItems(responseJson, modList[_syndicates[Syndicate.NewLoka]].Take(100).ToArray()));
+					modsToList = modList[_syndicates[Syndicate.PerrinSequence]];
 					break;
 				case ConsoleKey.D4:
-					orderIds.AddRange(await AddItems(responseJson, modList[_syndicates[Syndicate.PerrinSequence]].Take(100).ToArray()));
-					break;
-				case ConsoleKey.D5:
 					var customOrdersFile = "custom-orders.txt";
 					if (!File.Exists(customOrdersFile))
 					{
 						File.Create(customOrdersFile).Close();
 					}
-					orderIds.AddRange(await AddItems(responseJson, File.ReadAllLines(customOrdersFile).Take(100).ToArray()));
+					modsToList = File.ReadAllLines(customOrdersFile).Where(line => !string.IsNullOrWhiteSpace(line)).Select(line => line.Trim());
 					break;
 			}
 
+			var orderIds = new List<string>();
+			if (modsToList != null)
+			{
+				var items = ResolveItems(responseJson.data, modsToList);
+				var sortedItems = await SortByMarketPrice(items);
+				orderIds.AddRange(await AddItems(sortedItems.Take(100)));
+			}
+
 			$"Added Orders: {orderIds.Count}".WriteGoodMessage();
+		}
+
+		private const string _priceCacheFile = "prices.json";
+		private static readonly TimeSpan _priceCacheDuration = TimeSpan.FromDays(7);
+
+		private static List<WfmItem> ResolveItems(List<WfmItem>? marketItems, IEnumerable<string> modNames)
+		{
+			var itemsByName = new Dictionary<string, WfmItem>(StringComparer.OrdinalIgnoreCase);
+			foreach (var item in marketItems ?? new())
+			{
+				if (item.id != null && item.slug != null && item.name != null)
+				{
+					itemsByName.TryAdd(item.name, item);
+				}
+			}
+
+			var resolved = new List<WfmItem>();
+			var missing = new List<string>();
+			foreach (var name in modNames.Distinct(StringComparer.OrdinalIgnoreCase))
+			{
+				if (itemsByName.TryGetValue(name, out var item))
+				{
+					resolved.Add(item);
+				}
+				else
+				{
+					missing.Add(name);
+				}
+			}
+
+			if (missing.Count > 0)
+			{
+				$"Not found on warframe.market ({missing.Count}): {string.Join(", ", missing)}".WriteWarningMessage();
+			}
+			else
+			{
+				"All mods found!".WriteGoodMessage();
+			}
+
+			return resolved;
+		}
+
+		private static Dictionary<string, PriceCacheEntry> LoadPriceCache()
+		{
+			try
+			{
+				if (File.Exists(_priceCacheFile))
+				{
+					var cache = JsonConvert.DeserializeObject<Dictionary<string, PriceCacheEntry>>(File.ReadAllText(_priceCacheFile));
+					if (cache != null)
+					{
+						return new Dictionary<string, PriceCacheEntry>(cache, StringComparer.OrdinalIgnoreCase);
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				$"Price cache unreadable, rebuilding: {ex.Message}".WriteWarningMessage();
+			}
+
+			return new Dictionary<string, PriceCacheEntry>(StringComparer.OrdinalIgnoreCase);
+		}
+
+		private static async Task<List<WfmItem>> SortByMarketPrice(List<WfmItem> items)
+		{
+			var cache = LoadPriceCache();
+			// Items without a cached price (new or never listed) are re-checked every run.
+			var stale = items
+				.Where(i => !cache.TryGetValue(i.slug!, out var entry)
+					|| entry.platinum == null
+					|| DateTime.UtcNow - entry.updatedAt > _priceCacheDuration)
+				.ToList();
+
+			if (stale.Count > 0)
+			{
+				$"Fetching market prices for {stale.Count} mod(s)...".WriteInfoMessage();
+				var progress = 0;
+				foreach (var item in stale)
+				{
+					progress++;
+					try
+					{
+						var price = await GetMarketPrice(item.slug!);
+						cache[item.slug!] = new PriceCacheEntry { platinum = price, updatedAt = DateTime.UtcNow };
+						var line = $"[{progress}/{stale.Count}] {item.name}: {(price?.ToString() ?? "no sell orders")}";
+						if (price != null)
+						{
+							line.WriteGoodMessage();
+						}
+						else
+						{
+							line.WriteWarningMessage();
+						}
+					}
+					catch (Exception ex)
+					{
+						$"Price lookup failed for {item.name}: {ex.Message}".WriteErrorMessage();
+					}
+				}
+
+				File.WriteAllText(_priceCacheFile, JsonConvert.SerializeObject(cache, Formatting.Indented));
+			}
+			else
+			{
+				$"Using cached market prices for {items.Count} mod(s)".WriteInfoMessage();
+			}
+
+			int PriceOf(WfmItem item) => cache.TryGetValue(item.slug!, out var entry) && entry.platinum != null ? entry.platinum.Value : -1;
+
+			var sorted = items.OrderByDescending(PriceOf).ThenBy(i => i.name).ToList();
+			var unpriced = sorted.Where(i => PriceOf(i) < 0).Select(i => i.name).ToList();
+			if (unpriced.Count > 0)
+			{
+				$"No market price, listed last: {string.Join(", ", unpriced)}".WriteWarningMessage();
+			}
+
+			return sorted;
+		}
+
+		private static async Task<int?> GetMarketPrice(string slug)
+		{
+			using var response = await _client.GetAsyncWaited($"https://api.warframe.market/v2/orders/item/{slug}", _minApiTime);
+			var responseContent = await response.Content.ReadAsStringAsync();
+			var orders = JsonConvert.DeserializeObject<ApiResponse<List<WfmItemOrder>>>(responseContent);
+			if (orders?.HasError == true)
+			{
+				throw new ApiException($"API Error: {orders.GetErrorMessage()}", orders.apiVersion, orders.error);
+			}
+
+			var sellOrders = orders?.data?
+				.Where(o => o.type == "sell" && o.visible != false && (o.rank ?? 0) == 0 && o.platinum != null)
+				.ToList() ?? new();
+			var onlineSellOrders = sellOrders
+				.Where(o => o.user?.status == "ingame" || o.user?.status == "online")
+				.ToList();
+
+			var source = onlineSellOrders.Count > 0 ? onlineSellOrders : sellOrders;
+			// Median of the cheapest few listings, so a single troll/lowball order doesn't skew the price.
+			var cheapest = source.Select(o => o.platinum!.Value).OrderBy(p => p).Take(5).ToList();
+			if (cheapest.Count == 0)
+			{
+				return null;
+			}
+
+			var middle = cheapest.Count / 2;
+			return cheapest.Count % 2 == 1
+				? cheapest[middle]
+				: (int)Math.Round((cheapest[middle - 1] + cheapest[middle]) / 2.0, MidpointRounding.AwayFromZero);
 		}
 
 		private static readonly Dictionary<string, HashSet<string>> _syndicateAugments = new(StringComparer.OrdinalIgnoreCase)
@@ -467,44 +609,12 @@ namespace Kellphy.Warframe.MarketTool
 			request.Dispose();
 		}
 
-		private static async Task<List<string>> AddItems(ApiResponse<List<WfmItem>>? responseJson, string[] syndicateMods)
+		private static async Task<List<string>> AddItems(IEnumerable<WfmItem> items)
 		{
-			var itemList = new Dictionary<string, string>();
-			if (responseJson?.data != null)
-			{
-				foreach (var item in responseJson.data)
-				{
-					if (item.id != null && item.name != null)
-					{
-						if (syndicateMods.Any(i => i.Equals(item.name, StringComparison.CurrentCultureIgnoreCase)))
-						{
-							itemList.Add(item.id, item.name);
-						}
-					}
-				}
-			}
-
-			if (itemList.Count != syndicateMods.Length)
-			{
-				$"Difference of {(syndicateMods.Length - itemList.Count)}".WriteWarningMessage();
-
-				foreach (var newItem in syndicateMods)
-				{
-					if (!itemList.Any(t => t.Value.Equals(newItem, StringComparison.CurrentCultureIgnoreCase)))
-					{
-						newItem.WriteWarningMessage();
-					}
-				}
-			}
-			else
-			{
-				$"All mods found!".WriteGoodMessage();
-			}
-
 			var orderIds = new List<string>();
-			foreach (var item in itemList)
+			foreach (var item in items)
 			{
-				var orderId = await AddOrder(item.Key);
+				var orderId = await AddOrder(item.id!);
 				if (orderId != null)
 				{
 					orderIds.Add(orderId);

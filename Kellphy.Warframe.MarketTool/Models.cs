@@ -107,6 +107,23 @@ public class WfmOrder
 	public string? itemId { get; set; }
 }
 
+public class WfmItemOrder : WfmOrder
+{
+	public WfmOrderUser? user { get; set; }
+}
+
+public class WfmOrderUser
+{
+	public string? ingameName { get; set; }
+	public string? status { get; set; }
+}
+
+public class PriceCacheEntry
+{
+	public int? platinum { get; set; }
+	public DateTime updatedAt { get; set; }
+}
+
 public class WfmUser
 {
 	public string? id { get; set; }
